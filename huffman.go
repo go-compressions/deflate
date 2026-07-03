@@ -111,6 +111,13 @@ func (e *huffEncoder) assign(lengths []uint8) {
 // describes a complete prefix code (Kraft sum == 1) covering at least two
 // symbols, so any RFC 1951 decoder — including compress/flate — accepts it.
 func codeLengths(freq []int) []uint8 {
+	return codeLengthsLimited(freq, maxCodeLen)
+}
+
+// codeLengthsLimited is codeLengths with an explicit maximum code length. The
+// code-length alphabet of a dynamic header is transmitted as 3-bit lengths, so
+// it must be limited to 7 bits.
+func codeLengthsLimited(freq []int, maxBits int) []uint8 {
 	n := len(freq)
 	lengths := make([]uint8, n)
 
@@ -124,7 +131,7 @@ func codeLengths(freq []int) []uint8 {
 	// Force at least two symbols so the code is complete (Kraft == 1). This
 	// keeps degenerate blocks (empty input, no matches, a single distance)
 	// decodable by strict decoders without a single-code special case.
-	for i := 0; len(nz) < 2; i++ {
+	for i := 0; i < n && len(nz) < 2; i++ {
 		if freq[i] == 0 {
 			nz = append(nz, i)
 		}
@@ -134,7 +141,7 @@ func codeLengths(freq []int) []uint8 {
 	assignHuffmanLengths(freq, nz, lengths)
 
 	// Repair the lengths into a complete, depth-limited code.
-	limitAndComplete(nz, lengths)
+	limitAndComplete(nz, lengths, maxBits)
 	return lengths
 }
 
@@ -215,11 +222,12 @@ func assignHuffmanLengths(freq []int, nz []int, lengths []uint8) {
 
 // limitAndComplete clamps every length in nz to maxCodeLen and then adjusts the
 // lengths so they form a complete prefix code (Kraft sum == 2^maxCodeLen).
-func limitAndComplete(nz []int, lengths []uint8) {
-	const target = 1 << maxCodeLen
+func limitAndComplete(nz []int, lengths []uint8, maxBits int) {
+	target := 1 << maxBits
+	mb := uint8(maxBits)
 	for _, sym := range nz {
-		if lengths[sym] > maxCodeLen {
-			lengths[sym] = maxCodeLen
+		if lengths[sym] > mb {
+			lengths[sym] = mb
 		}
 		if lengths[sym] == 0 {
 			lengths[sym] = 1
@@ -228,7 +236,7 @@ func limitAndComplete(nz []int, lengths []uint8) {
 	kraft := func() int {
 		k := 0
 		for _, sym := range nz {
-			k += 1 << (maxCodeLen - lengths[sym])
+			k += 1 << (maxBits - int(lengths[sym]))
 		}
 		return k
 	}
@@ -237,7 +245,7 @@ func limitAndComplete(nz []int, lengths []uint8) {
 	for kraft() > target {
 		best := -1
 		for _, sym := range nz {
-			if lengths[sym] < maxCodeLen && (best < 0 || lengths[sym] > lengths[best]) {
+			if lengths[sym] < mb && (best < 0 || lengths[sym] > lengths[best]) {
 				best = sym
 			}
 		}
@@ -252,7 +260,7 @@ func limitAndComplete(nz []int, lengths []uint8) {
 		}
 		best := -1
 		for _, sym := range nz {
-			inc := 1 << (maxCodeLen - lengths[sym])
+			inc := 1 << (maxBits - int(lengths[sym]))
 			if lengths[sym] > 1 && inc <= deficit && (best < 0 || lengths[sym] > lengths[best]) {
 				best = sym
 			}

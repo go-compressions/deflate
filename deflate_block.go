@@ -90,7 +90,7 @@ func buildDynamic(litLen, distLen []uint8) dynHeader {
 		}
 	}
 
-	clLen := codeLengths(clFreq)
+	clLen := codeLengthsLimited(clFreq, 7)
 	ncode := numCodeLen
 	for ncode > 4 && clLen[codeLengthOrder[ncode-1]] == 0 {
 		ncode--
