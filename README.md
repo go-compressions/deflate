@@ -68,7 +68,44 @@ without single-code special cases.
 
 ## Benchmarks
 
-<!-- BENCH -->
+Measured on an **Apple M4 Max** (native `darwin/arm64`), Go 1.26.4, best of
+several `-count` runs, **as of 2026-07-03**. Three corpora: `text` (1.35 MB of
+Go stdlib `net/http` source), `json` (1.4 MB synthetic record array), `binary`
+(3 MB prefix of the `go` tool binary). Encode/decode throughput in MB/s
+(higher is better); *ratio* is compressed size ÷ original (lower is better).
+
+| corpus | level | encode ours | encode `flate` | vs `flate` | decode ours | decode `flate` | vs `flate` | ratio ours | ratio `flate` |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| text   | speed   | 102 | 176 | 0.58× | 163 | 278  | 0.59× | 0.275 | 0.329 |
+| text   | default | 65  | 51  | **1.26×** | 173 | 343  | 0.50× | 0.268 | 0.263 |
+| text   | best    | 63  | 44  | **1.44×** | 170 | 339  | 0.50× | 0.268 | 0.263 |
+| json   | speed   | 261 | 480 | 0.54× | 358 | 741  | 0.48× | 0.106 | 0.133 |
+| json   | default | 116 | 150 | 0.77× | 370 | 1028 | 0.36× | 0.098 | 0.096 |
+| json   | best    | 111 | 50  | **2.21×** | 378 | 1132 | 0.33× | 0.098 | 0.089 |
+| binary | speed   | 75  | 132 | 0.56× | 98  | 214  | 0.46× | 0.453 | 0.492 |
+| binary | default | 63  | 61  | **1.03×** | 99  | 235  | 0.42× | 0.449 | 0.449 |
+| binary | best    | 61  | 56  | **1.10×** | 100 | 238  | 0.42× | 0.449 | 0.448 |
+
+**Honest verdict.**
+
+- **Encode, default/best levels — competitive to faster than `compress/flate`.**
+  At the default level our encoder matches `flate` on `binary` (1.03×) and beats
+  it on `text` (1.26×) at essentially equal ratio; on `json` it trails (0.77×) at
+  equal ratio. At the best level it is 1.1–2.2× faster, though there part of the
+  speed comes from a slightly larger output (e.g. `json` 0.098 vs 0.089) — a fair
+  trade, not a free win. The SIMD `matchlen` kernel is in the hot path; as with
+  the sibling `lz4`, end-to-end gains are bounded because encode time is
+  dominated by match-*finding* (hash chains), not match-*extension*.
+- **Encode, `BestSpeed` — `flate` wins (~2×).** The standard library ships a
+  hand-specialized fast-path encoder for level 1; our general hash-chain parse
+  does not beat it.
+- **Decode — `flate` is ~2× faster.** Our decoder is a small, correct,
+  bit-serial count/symbol Huffman design; `flate`'s is a mature table-driven,
+  chunked decoder. Decode is inherently bit-serial and not SIMD-amenable, so we
+  target correctness and compatibility here rather than raw speed.
+
+Reproduce with the program under `benchmarks/`. Numbers are single-host; the
+relative picture is what matters.
 
 ## License
 
