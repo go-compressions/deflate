@@ -133,15 +133,12 @@ func init() {
 // readBlockHeader begins a block and prepares Huffman decoders. It returns the
 // block type (0 stored, 1 fixed, 2 dynamic).
 func (z *reader) readBlock() error {
-	fin, err := z.bits(1)
+	hdr, err := z.bits(3)
 	if err != nil {
 		return err
 	}
-	z.final = fin == 1
-	typ, err := z.bits(2)
-	if err != nil {
-		return err
-	}
+	z.final = hdr&1 == 1
+	typ := hdr >> 1
 	switch typ {
 	case 0:
 		return z.storedBlock()

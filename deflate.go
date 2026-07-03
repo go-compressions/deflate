@@ -1,16 +1,3 @@
-// Package deflate is a pure-Go (CGO=0) implementation of the DEFLATE
-// compressed data format defined by RFC 1951 — both the encoder (deflate) and
-// the decoder (inflate).
-//
-// It is wire-compatible with the standard library's compress/flate in both
-// directions: this package's decoder reads any stream produced by
-// flate.NewWriter, and flate.NewReader reads any stream produced by this
-// package's Writer.
-//
-// The encoder's LZ77 match-finder delegates its hot "how far do these two
-// positions match" inner loop to github.com/go-compressions/matchlen, whose
-// SIMD common-prefix kernel accelerates match extension on all six of Go's
-// 64-bit targets (amd64, arm64, riscv64, loong64, ppc64le and s390x).
 package deflate
 
 // DEFLATE format constants (RFC 1951).

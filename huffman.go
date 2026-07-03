@@ -154,11 +154,8 @@ type heapNode struct {
 
 // assignHuffmanLengths builds a Huffman tree over the symbols in nz (using
 // their frequencies) and writes each symbol's depth into lengths.
+// It requires at least two symbols in nz (codeLengths guarantees this).
 func assignHuffmanLengths(freq []int, nz []int, lengths []uint8) {
-	if len(nz) == 1 {
-		lengths[nz[0]] = 1
-		return
-	}
 	nodes := make([]heapNode, 0, 2*len(nz))
 	// Min-heap of node indices ordered by frequency.
 	heap := make([]int, 0, len(nz))
@@ -228,9 +225,6 @@ func limitAndComplete(nz []int, lengths []uint8, maxBits int) {
 	for _, sym := range nz {
 		if lengths[sym] > mb {
 			lengths[sym] = mb
-		}
-		if lengths[sym] == 0 {
-			lengths[sym] = 1
 		}
 	}
 	kraft := func() int {

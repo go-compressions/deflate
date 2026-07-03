@@ -52,11 +52,10 @@ func buildDynamic(litLen, distLen []uint8) dynHeader {
 				run -= n
 				i += n
 			}
+			// After the code-18 loop above, run < 11, so a single code 17
+			// (3..10 zeros) covers whatever is left.
 			for run >= 3 {
 				n := run
-				if n > 10 {
-					n = 10
-				}
 				items = append(items, rleItem{sym: 17, nb: 3, val: uint16(n - 3)})
 				clFreq[17]++
 				run -= n
