@@ -2,9 +2,9 @@ package deflate
 
 // rleItem is one run-length-encoded code-length symbol for a dynamic header.
 type rleItem struct {
-	sym  uint8
-	nb   uint8  // number of extra bits
-	val  uint16 // extra-bits value
+	sym uint8
+	nb  uint8  // number of extra bits
+	val uint16 // extra-bits value
 }
 
 // dynHeader holds everything needed to size and emit a dynamic-block header.

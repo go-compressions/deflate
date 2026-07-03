@@ -45,15 +45,15 @@ var levels = []int{NoCompression, BestSpeed, 2, 3, 4, 5, 6, 7, 8, BestCompressio
 
 func TestRoundTripEdgeCases(t *testing.T) {
 	cases := map[string][]byte{
-		"empty":        nil,
-		"single":       {0x42},
-		"twobytes":     {1, 2},
-		"text":         []byte("The quick brown fox jumps over the lazy dog."),
-		"repeat":       bytes.Repeat([]byte("A"), 300),
-		"repeat2":      bytes.Repeat([]byte("abcd"), 5000),
-		"overwindow":   bytes.Repeat([]byte("0123456789abcdef"), 5000),
-		"nullbytes":    make([]byte, 1000),
-		"maxmatch":     bytes.Repeat([]byte{7}, 258*4),
+		"empty":      nil,
+		"single":     {0x42},
+		"twobytes":   {1, 2},
+		"text":       []byte("The quick brown fox jumps over the lazy dog."),
+		"repeat":     bytes.Repeat([]byte("A"), 300),
+		"repeat2":    bytes.Repeat([]byte("abcd"), 5000),
+		"overwindow": bytes.Repeat([]byte("0123456789abcdef"), 5000),
+		"nullbytes":  make([]byte, 1000),
+		"maxmatch":   bytes.Repeat([]byte{7}, 258*4),
 	}
 	for name, data := range cases {
 		for _, lvl := range levels {

@@ -112,8 +112,8 @@ func craftTruncatedRep(t *testing.T, repSym uint8, repNB uint8) []byte {
 		}
 		var bw bitWriter
 		bw.writeBits(1|(2<<1), 3)
-		bw.writeBits(0, 5)  // hlit -> 257
-		bw.writeBits(0, 5)  // hdist -> 1
+		bw.writeBits(0, 5) // hlit -> 257
+		bw.writeBits(0, 5) // hdist -> 1
 		bw.writeBits(uint32(ncode-4), 4)
 		for i := 0; i < ncode; i++ {
 			bw.writeBits(uint32(clLen[codeLengthOrder[i]]), 3)

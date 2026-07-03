@@ -147,7 +147,7 @@ func TestTruncationSweep(t *testing.T) {
 	// must error rather than panic or silently succeed.
 	inputs := [][]byte{
 		bytes.Repeat([]byte{0x00, 0x11, 0x22, 0x33}, 20000), // random-ish -> stored/dynamic
-		[]byte("hello"),                                     // tiny -> fixed
+		[]byte("hello"), // tiny -> fixed
 		bytes.Repeat([]byte("The quick brown fox. "), 2000), // -> dynamic
 	}
 	for _, in := range inputs {
@@ -321,9 +321,9 @@ func TestStdlibDynamicIntoOurDecoder(t *testing.T) {
 	// Ensure we decode stdlib dynamic blocks (including possible empty distance
 	// codes) across several inputs.
 	inputs := [][]byte{
-		bytes.Repeat([]byte("a"), 1000),                       // few/no distances edge
-		[]byte("abcdefghijklmnopqrstuvwxyz"),                  // literals only
-		bytes.Repeat([]byte("hello world "), 3000),            // dynamic
+		bytes.Repeat([]byte("a"), 1000),            // few/no distances edge
+		[]byte("abcdefghijklmnopqrstuvwxyz"),       // literals only
+		bytes.Repeat([]byte("hello world "), 3000), // dynamic
 	}
 	for _, in := range inputs {
 		for _, lvl := range []int{stdflate.BestSpeed, stdflate.DefaultCompression, stdflate.BestCompression} {

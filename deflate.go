@@ -6,14 +6,14 @@ const (
 	minMatch   = 3     // shortest LZ77 back-reference length
 	windowSize = 32768 // maximum back-reference distance (32 KiB)
 
-	maxCodeLen = 15 // maximum bits in a Huffman code
+	maxCodeLen = 15  // maximum bits in a Huffman code
 	endBlock   = 256 // end-of-block symbol in the literal/length alphabet
 
-	numLitLen   = 286 // literal/length alphabet size (0..285)
-	numDist     = 30  // distance alphabet size (0..29)
-	numCodeLen  = 19  // code-length alphabet size (0..18)
-	maxNumLit   = 286
-	maxNumDist  = 30
+	numLitLen  = 286 // literal/length alphabet size (0..285)
+	numDist    = 30  // distance alphabet size (0..29)
+	numCodeLen = 19  // code-length alphabet size (0..18)
+	maxNumLit  = 286
+	maxNumDist = 30
 )
 
 // Compression levels, mirroring compress/flate.
