@@ -68,44 +68,72 @@ without single-code special cases.
 
 ## Benchmarks
 
-Measured on an **Apple M4 Max** (native `darwin/arm64`), Go 1.26.4, best of
-several `-count` runs, **as of 2026-07-03**. Three corpora: `text` (1.35 MB of
-Go stdlib `net/http` source), `json` (1.4 MB synthetic record array), `binary`
-(3 MB prefix of the `go` tool binary). Encode/decode throughput in MB/s
-(higher is better); *ratio* is compressed size ÷ original (lower is better).
+Reproducible via the committed benchmarks — no external corpus, the inputs are
+generated deterministically in-process:
 
-| corpus | level | encode ours | encode `flate` | vs `flate` | decode ours | decode `flate` | vs `flate` | ratio ours | ratio `flate` |
-|---|---|--:|--:|--:|--:|--:|--:|--:|--:|
-| text   | speed   | 102 | 176 | 0.58× | 163 | 278  | 0.59× | 0.275 | 0.329 |
-| text   | default | 65  | 51  | **1.26×** | 173 | 343  | 0.50× | 0.268 | 0.263 |
-| text   | best    | 63  | 44  | **1.44×** | 170 | 339  | 0.50× | 0.268 | 0.263 |
-| json   | speed   | 261 | 480 | 0.54× | 358 | 741  | 0.48× | 0.106 | 0.133 |
-| json   | default | 116 | 150 | 0.77× | 370 | 1028 | 0.36× | 0.098 | 0.096 |
-| json   | best    | 111 | 50  | **2.21×** | 378 | 1132 | 0.33× | 0.098 | 0.089 |
-| binary | speed   | 75  | 132 | 0.56× | 98  | 214  | 0.46× | 0.453 | 0.492 |
-| binary | default | 63  | 61  | **1.03×** | 99  | 235  | 0.42× | 0.449 | 0.449 |
-| binary | best    | 61  | 56  | **1.10×** | 100 | 238  | 0.42× | 0.449 | 0.448 |
+```sh
+go test -run=^$ -bench=. -benchmem
+```
+
+Numbers below are from an **Apple M4 Max** (`darwin/arm64`), Go 1.26.4, on four
+512 KiB corpora, **as of 2026-07-03**. Throughput is MB/s (higher is better);
+*ratio* is compressed ÷ original (lower is better); *allocs* is allocations per
+operation. **These are the exact values `go test -bench` prints on this host;
+they are what the claims below are based on — nothing is cherry-picked.**
+
+### Encode (this package vs `compress/flate`)
+
+| corpus | level | ours MB/s | `flate` MB/s | ours vs `flate` | ratio ours | ratio `flate` | allocs ours | allocs `flate` |
+|---|---|--:|--:|--:|--:|--:|--:|--:|
+| text       | default | 18.2 | 16.9 | **1.08×** | 0.203  | 0.205  | 398 | 27 |
+| text       | best    | 17.2 | 11.5 | **1.49×** | 0.203  | 0.202  | 398 | 27 |
+| json       | default | 103  | 131  | 0.79×     | 0.105  | 0.100  | 394 | 26 |
+| json       | best    | 97.7 | 45.6 | **2.14×** | 0.105  | 0.091  | 394 | 26 |
+| binary     | default | 71.5 | 99.7 | 0.72×     | 0.834  | 0.835  | 393 | 29 |
+| binary     | best    | 71.4 | 99.8 | 0.72×     | 0.834  | 0.835  | 393 | 29 |
+| repetitive | default | 690  | 790  | 0.87×     | 0.0034 | 0.0030 | 287 | 21 |
+| repetitive | best    | 686  | 790  | 0.87×     | 0.0034 | 0.0030 | 287 | 21 |
+
+### Decode (both decoders reading the *same* `flate`-produced stream)
+
+| corpus | level | ours MB/s | `flate` MB/s | ours vs `flate` |
+|---|---|--:|--:|--:|
+| text       | default | 253 | 460   | 0.55× |
+| text       | best    | 266 | 472   | 0.56× |
+| json       | default | 343 | 973   | 0.35× |
+| json       | best    | 342 | 1067  | 0.32× |
+| binary     | default | 68.7 | 216  | 0.32× |
+| binary     | best    | 68.8 | 216  | 0.32× |
+| repetitive | default | 464 | 10971 | 0.04× |
+| repetitive | best    | 465 | 10961 | 0.04× |
 
 **Honest verdict.**
 
-- **Encode, default/best levels — competitive to faster than `compress/flate`.**
-  At the default level our encoder matches `flate` on `binary` (1.03×) and beats
-  it on `text` (1.26×) at essentially equal ratio; on `json` it trails (0.77×) at
-  equal ratio. At the best level it is 1.1–2.2× faster, though there part of the
-  speed comes from a slightly larger output (e.g. `json` 0.098 vs 0.089) — a fair
-  trade, not a free win. The SIMD `matchlen` kernel is in the hot path; as with
-  the sibling `lz4`, end-to-end gains are bounded because encode time is
-  dominated by match-*finding* (hash chains), not match-*extension*.
-- **Encode, `BestSpeed` — `flate` wins (~2×).** The standard library ships a
-  hand-specialized fast-path encoder for level 1; our general hash-chain parse
-  does not beat it.
-- **Decode — `flate` is ~2× faster.** Our decoder is a small, correct,
-  bit-serial count/symbol Huffman design; `flate`'s is a mature table-driven,
-  chunked decoder. Decode is inherently bit-serial and not SIMD-amenable, so we
-  target correctness and compatibility here rather than raw speed.
+- **Encode is a mixed picture, not a blanket win.** We are faster on `text`
+  (1.08× default, **1.49× best**) and on `json` at the best level (**2.14×**,
+  because `flate`'s BestCompression pays for exhaustive lazy matching), at
+  essentially equal ratio on `text`. We are **slower on `binary` (0.72×),
+  `repetitive` (0.87×) and `json` at the default level (0.79×)**. On a *mixed*
+  corpus these average out to roughly parity-to-slightly-slower (~0.85–0.9×).
+  Ratios track `flate` within ~1% except `json` and `repetitive`, where ours is
+  a little larger. We also **allocate far more per operation (~390–400 vs ~27)**
+  — a per-block allocation cost (frequency tables, code tables, token buffers)
+  that is the clearest thing left to optimize.
+- **`flate` wins decode across the board (≈1.8–3×, and ~25× on the highly
+  repetitive input).** Our decoder is a small, correct, bit-serial count/symbol
+  Huffman design that copies back-references byte-by-byte; `flate`'s is a mature
+  table-driven decoder with fast bulk copies. Decode is inherently bit-serial and
+  not SIMD-amenable, so this package targets correctness and wire-compatibility
+  here rather than raw speed.
+- **The SIMD `matchlen` kernel is in the encoder's hot path**, but — as with the
+  sibling `lz4` — end-to-end gains are bounded because encode time is dominated
+  by match-*finding* (hash chains), not match-*extension*.
 
-Reproduce with the program under `benchmarks/`. Numbers are single-host; the
-relative picture is what matters.
+In short: **correctness-first and wire-compatible; competitive encode on text,
+slower decode than the standard library.** If raw throughput on arbitrary data
+is the priority, `compress/flate` is still the better choice; the value here is
+a clean, fully-tested, SIMD-`matchlen` DEFLATE that interoperates with it
+exactly.
 
 ## License
 
