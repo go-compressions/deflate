@@ -28,7 +28,7 @@ func (h *huffDecoder) build(lengths []int) error {
 	}
 	if h.count[0] == uint16(len(lengths)) {
 		// No codes at all: a valid (empty) code. decode() will error if used.
-		h.symbol = h.symbol[:0]
+		h.symbol = nil
 		return nil
 	}
 	// Check for an over-subscribed code set.
@@ -45,10 +45,12 @@ func (h *huffDecoder) build(lengths []int) error {
 	for l := 1; l <= maxCodeLen; l++ {
 		offs[l+1] = offs[l] + h.count[l]
 	}
-	if cap(h.symbol) < len(lengths) {
-		h.symbol = make([]uint16, len(lengths))
-	}
-	h.symbol = h.symbol[:len(lengths)]
+	// Always allocate a fresh backing array. build() is called on decoders that
+	// may be shallow struct copies of the shared package-global fixed decoders
+	// (see readBlock, BTYPE=01), so reusing an existing slice in place would
+	// scribble over fixedLit/fixedDist process-globally — corrupting every later
+	// fixed-Huffman decode, including in other (possibly concurrent) readers.
+	h.symbol = make([]uint16, len(lengths))
 	n := 0
 	for sym, l := range lengths {
 		if l != 0 {
