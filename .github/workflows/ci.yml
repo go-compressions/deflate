@@ -45,4 +45,4 @@ jobs:
         with: { go-version: stable }
       - run: docker run --privileged --rm tonistiigi/binfmt --install all
       - run: CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go test -c -o /tmp/t.test .
-      - run: docker run --rm --platform linux/${{ matrix.arch }} -e QEMU_CPU=${{ matrix.qemu }} -v /tmp:/t ${{ matrix.image }} /t/t.test -test.v -test.timeout 20m
+      - run: docker run --rm --platform linux/${{ matrix.arch }} -e QEMU_CPU=${{ matrix.qemu }} -v /tmp:/t ${{ matrix.image }} /t/t.test -test.v -test.short -test.timeout 20m

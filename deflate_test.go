@@ -64,8 +64,12 @@ func TestRoundTripEdgeCases(t *testing.T) {
 
 func TestRoundTripStructuredFuzz(t *testing.T) {
 	r := rand.New(rand.NewSource(2024))
-	for iter := 0; iter < 120; iter++ {
-		n := r.Intn(90000)
+	iters, maxN := 120, 90000
+	if testing.Short() { // qemu-emulated lanes: fewer, smaller cases
+		iters, maxN = 24, 20000
+	}
+	for iter := 0; iter < iters; iter++ {
+		n := r.Intn(maxN)
 		data := make([]byte, n)
 		switch r.Intn(5) {
 		case 0:

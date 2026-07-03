@@ -143,6 +143,11 @@ func TestNonEOFReadError(t *testing.T) {
 }
 
 func TestTruncationSweep(t *testing.T) {
+	// This byte-by-byte sweep is O(n^2); skip it under -short (used by the
+	// qemu-emulated CI lanes, which validate big-endian correctness instead).
+	if testing.Short() {
+		t.Skip("skipping exhaustive truncation sweep under -short")
+	}
 	// For representative streams (stored, fixed, dynamic), every truncation
 	// must error rather than panic or silently succeed.
 	inputs := [][]byte{
@@ -171,6 +176,9 @@ func TestTruncationSweep(t *testing.T) {
 }
 
 func TestCorruptionFuzz(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping corruption fuzz under -short")
+	}
 	rng := rand.New(rand.NewSource(5))
 	inputs := [][]byte{
 		bytes.Repeat([]byte("abcdefghij 0123456789 "), 500),
