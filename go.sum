@@ -1,2 +1,4 @@
-github.com/go-compressions/matchlen v0.1.1 h1:JrP6PUJsvprMrKDahWnaoyBesU5O5diYFAnynguZ960=
-github.com/go-compressions/matchlen v0.1.1/go.mod h1:zvMloPACCOmtUdiow9teTtA2ExlPLKjQn5a2UcpgQx0=
+github.com/go-simd/matchlen v0.3.1 h1:HKyOis1LaXPGEr8esAj8wkOhrjK7W24P7RlMYbTHyk4=
+github.com/go-simd/matchlen v0.3.1/go.mod h1:h95M7Ih4MZqO1+Dir0S+joy170I4NrPYaqQFInebWzo=
+golang.org/x/sys v0.46.0 h1:noSf2Fq6F8DBgS+LysIkx7rIExoNHJsxOAtPp4rthXw=
+golang.org/x/sys v0.46.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=

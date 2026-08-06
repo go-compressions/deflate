@@ -19,7 +19,7 @@
 // # SIMD match extension
 //
 // The encoder's LZ77 parse delegates its hot "how far do these two positions
-// match" inner loop to github.com/go-compressions/matchlen, whose common-prefix
+// match" inner loop to github.com/go-simd/matchlen, whose common-prefix
 // kernel is SIMD-accelerated on four of Go's 64-bit targets (amd64, arm64,
 // riscv64 and loong64) and a portable word-at-a-time scalar elsewhere — all on
 // a plain go build.
