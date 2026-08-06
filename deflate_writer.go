@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/go-compressions/matchlen"
+	"github.com/go-simd/matchlen"
 )
 
 // hashBits sizes the match-finder hash table (2^hashBits entries).
