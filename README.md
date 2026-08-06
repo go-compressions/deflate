@@ -20,9 +20,9 @@ produces — both back to the original bytes.
 
 The encoder's LZ77 parse delegates its hot "how far do these two positions
 match" inner loop to [matchlen](https://github.com/go-compressions/matchlen),
-whose SIMD common-prefix kernel accelerates match extension on **all six** of
-Go's 64-bit targets — amd64 (SSE2), arm64 (NEON), riscv64 (RVV), loong64 (LSX),
-ppc64le (VSX) and s390x (vector facility) — on a plain `go build`.
+whose SIMD common-prefix kernel accelerates match extension on four of Go's
+64-bit targets — amd64 (SSE2), arm64 (NEON), riscv64 (RVV) and loong64 (LSX) —
+with a portable word-at-a-time scalar fallback elsewhere, on a plain `go build`.
 
 ## Install
 
