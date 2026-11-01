@@ -33,10 +33,18 @@ type reader struct {
 	litHuff  huffDecoder
 	distHuff huffDecoder
 
-	final bool  // last block already started
-	eof   bool  // stream fully decoded
-	err   error // sticky error
+	final   bool  // last block already started
+	inBlock bool  // a Huffman block was interrupted to let Read drain buf
+	eof     bool  // stream fully decoded
+	err     error // sticky error
 }
+
+// pendingLimit is how much undelivered output a Huffman block may pile up
+// before it yields to Read. A block has no size limit in the format and expands
+// up to 1032:1 (a 258-byte match costs two bits), so decoding it in one go held
+// ~1 GiB of output for every MiB of input even when the caller wanted one byte.
+// A match is not split, so the buffer may pass this by at most 258 bytes.
+const pendingLimit = 1 << 16
 
 // NewReader returns an io.ReadCloser that decompresses the raw DEFLATE (RFC
 // 1951) stream read from r. It is the inverse of NewWriter and also reads
@@ -277,8 +285,17 @@ func (z *reader) dynamicTables() error {
 }
 
 // huffmanBlock decodes literals and back-references until end-of-block.
+//
+// It returns early, with z.inBlock set, once pendingLimit bytes await delivery;
+// fill resumes it, with the same tables, after Read has drained them.
 func (z *reader) huffmanBlock() error {
+	z.inBlock = false
+	yieldAt := z.rpos + pendingLimit
 	for {
+		if len(z.buf) >= yieldAt {
+			z.inBlock = true
+			return nil
+		}
 		sym, err := z.decode(&z.litHuff)
 		if err != nil {
 			return err
@@ -326,11 +343,17 @@ func (z *reader) huffmanBlock() error {
 // stream ends.
 func (z *reader) fill() {
 	for z.rpos >= len(z.buf) && !z.eof && z.err == nil {
-		if z.final {
+		var err error
+		switch {
+		case z.inBlock:
+			err = z.huffmanBlock()
+		case z.final:
 			z.eof = true
 			return
+		default:
+			err = z.readBlock()
 		}
-		if err := z.readBlock(); err != nil {
+		if err != nil {
 			z.err = err
 			return
 		}
@@ -372,13 +395,36 @@ func (z *reader) compact() {
 }
 
 // Inflate decompresses a whole DEFLATE stream from src, appending the result to
-// dst and returning the extended slice.
+// dst and returning the extended slice. The result grows by at most
+// [DefaultMaxOutput] bytes; use [InflateLimit] for another ceiling.
 func Inflate(dst, src []byte) ([]byte, error) {
+	return InflateLimit(dst, src, DefaultMaxOutput)
+}
+
+// DefaultMaxOutput is the most bytes [Inflate] appends: 1 GiB. DEFLATE turns
+// two bits into 258 bytes (a length-258, distance-1 match), so a megabyte of
+// input legitimately expands to a gigabyte and only a ceiling bounds the result.
+const DefaultMaxOutput = 1 << 30
+
+// ErrTooLarge reports a stream that would decompress past the ceiling.
+var ErrTooLarge = errors.New("deflate: decompressed size past the ceiling")
+
+// InflateLimit is [Inflate] stopping with [ErrTooLarge] as soon as the stream
+// would append more than maxOut bytes to dst; the bytes up to the ceiling are
+// returned with the error. Decoding is incremental, so nothing past the ceiling
+// is decoded, let alone allocated.
+func InflateLimit(dst, src []byte, maxOut int) ([]byte, error) {
 	r := NewReader(bytes.NewReader(src))
 	buf := dst
 	tmp := make([]byte, 4096)
+	room := max(0, maxOut)
 	for {
 		n, err := r.Read(tmp)
+		if n > room {
+			buf = append(buf, tmp[:room]...)
+			return buf, ErrTooLarge
+		}
+		room -= n
 		buf = append(buf, tmp[:n]...)
 		if err == io.EOF {
 			return buf, nil

@@ -44,7 +44,10 @@ out, _ := io.ReadAll(r)
 
 // One-shot convenience helpers.
 comp := deflate.Deflate(nil, src)          // src -> DEFLATE
-orig, _ := deflate.Inflate(nil, comp)      // DEFLATE -> src
+orig, _ := deflate.Inflate(nil, comp)      // DEFLATE -> src, at most 1 GiB
+
+// Untrusted input: choose the ceiling.
+orig, err := deflate.InflateLimit(nil, comp, 64<<20) // deflate.ErrTooLarge past 64 MiB
 ```
 
 `NewWriter` accepts `DefaultCompression`, `NoCompression` and the range
@@ -65,6 +68,29 @@ Each block is emitted as whichever of **stored / fixed / dynamic** is smallest,
 with length-limited (≤ 15-bit, ≤ 7-bit for the code-length alphabet) Huffman
 codes generated so they are always *complete* — accepted by any RFC 1951 decoder
 without single-code special cases.
+
+## Untrusted input
+
+DEFLATE expands without limit: a length-258, distance-1 match costs two bits, so
+**a megabyte of input is a gigabyte of output (1032:1)**, and a single block has
+no size limit in the format.
+
+- **`NewReader` holds a bounded amount whatever the stream says.** A Huffman block
+  used to be decoded in one go, so reading *one byte* of a 1 MB stream decoded the
+  whole 1.03 GB block first (measured: 6.17 GB allocated, 2.2 GB live, 33 s). The
+  block now yields to `Read` every 64 KiB of undelivered output and resumes with its
+  tables; draining the same stream allocates 366 KB in total. The expansion itself
+  is paid by the caller reading, so a caller that collects everything
+  (`io.ReadAll`) should cap it with `io.LimitReader`.
+- **`Inflate` stops at `DefaultMaxOutput` (1 GiB)** with `ErrTooLarge`;
+  `InflateLimit(dst, src, maxOut)` sets another. Nothing past the ceiling is decoded.
+- Header sizes are all bounded by the format (at most 288 + 32 code lengths, stored
+  blocks at most 64 KiB), so no allocation follows a declared size.
+- Fuzzed: `FuzzInflate` (differential against `compress/flate`), `FuzzReader`,
+  `FuzzRoundTrip`.
+- The encoder buffers its whole input until `Close`, plus a 4-byte-per-input-byte
+  match table and its whole output: it is not a streaming encoder, and its memory
+  follows what the caller wrote, not any field of a stream.
 
 ## Benchmarks
 
