@@ -85,10 +85,14 @@ func init() {
 	for i := 288; i < 320; i++ {
 		lens[i] = 5
 	}
-	if err := buildTable(staticLit[:], lens[:288], litResults[:], litTableBits, maxCodeLen, sorted[:], false); err != nil {
-		panic(err)
-	}
-	if err := buildTable(staticOff[:], lens[288:], offResults[:], offTableBits, maxCodeLen, sorted[:], true); err != nil {
+	mustBuild(buildTable(staticLit[:], lens[:288], litResults[:], litTableBits, maxCodeLen, sorted[:], false))
+	mustBuild(buildTable(staticOff[:], lens[288:], offResults[:], offTableBits, maxCodeLen, sorted[:], true))
+}
+
+// mustBuild turns a failure to build a table of the fixed code, which is a
+// programming error, into a panic at start-up.
+func mustBuild(err error) {
+	if err != nil {
 		panic(err)
 	}
 }

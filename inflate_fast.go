@@ -100,10 +100,7 @@ func (s *state) room(n int) int {
 	}
 	need := s.op + n
 	if need > len(s.out) {
-		newLen := len(s.out) * 2
-		if newLen < need {
-			newLen = need
-		}
+		newLen := max(len(s.out)*2, need)
 		if newLen > s.limit || newLen < 0 {
 			newLen = s.limit
 		}
