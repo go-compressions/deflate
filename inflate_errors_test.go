@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 )
 
 // bitsOf packs (value, width) pairs LSB-first, as DEFLATE does, and pads to a
@@ -81,7 +82,25 @@ func TestInflateFastErrors(t *testing.T) {
 		{"offset code incomplete", offsetCode(2), ErrHuffman},
 	}
 	for _, c := range cases {
-		out, err := InflateLimit(nil, c.src, 1<<20)
+		// A decoder that ignored one of these errors would loop on the
+		// implicit zero bytes forever; make that a failure, not a hang.
+		type result struct {
+			out []byte
+			err error
+		}
+		done := make(chan result, 1)
+		go func() {
+			out, err := InflateLimit(nil, c.src, 1<<20)
+			done <- result{out, err}
+		}()
+		var out []byte
+		var err error
+		select {
+		case r := <-done:
+			out, err = r.out, r.err
+		case <-time.After(3 * time.Second):
+			t.Fatalf("%s: no answer in 3s", c.name)
+		}
 		if !errors.Is(err, c.want) {
 			t.Errorf("%s: err = %v, want %v (out %q)", c.name, err, c.want, out)
 		}
