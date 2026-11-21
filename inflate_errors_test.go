@@ -42,6 +42,22 @@ func TestInflateFastErrors(t *testing.T) {
 		}
 		return bitsOf(p...)
 	}
+	// A header whose literal/length code is valid ('a' and end-of-block, one
+	// bit each) and whose offset code has the given lengths.
+	offsetCode := func(dist ...uint8) []byte {
+		var syms []clSym
+		for i := 0; i < 257; i++ {
+			l := uint8(0)
+			if i == 'a' || i == 256 {
+				l = 1
+			}
+			syms = append(syms, clSym{sym: l})
+		}
+		for _, l := range dist {
+			syms = append(syms, clSym{sym: l})
+		}
+		return craftDynamicHeader(257, len(dist), syms, func(*bitWriter) {})
+	}
 	cases := []struct {
 		name string
 		src  []byte
@@ -57,6 +73,12 @@ func TestInflateFastErrors(t *testing.T) {
 		{"precode over-subscribed", precode(1, 1, 1, 1), errOversubscribed},
 		{"precode incomplete", precode(2, 0, 0, 0), ErrHuffman},
 		{"precode cut", precode(3, 3, 3, 3)[:3], io.ErrUnexpectedEOF},
+		{"precode empty", precode(0, 0, 0, 0), ErrHuffman},
+		{"repeat previous with no previous", precode(1, 0, 0, 0), ErrCodeLength},
+		{"repeat overruns, input cut", precode(0, 0, 1, 0), io.ErrUnexpectedEOF},
+		{"lengths run into the implicit zeros", precode(0, 0, 0, 1), io.ErrUnexpectedEOF},
+		{"offset code over-subscribed", offsetCode(1, 1, 1), errOversubscribed},
+		{"offset code incomplete", offsetCode(2), ErrHuffman},
 	}
 	for _, c := range cases {
 		out, err := InflateLimit(nil, c.src, 1<<20)
@@ -92,5 +114,26 @@ func TestInflateFastEveryPrefixIsRefused(t *testing.T) {
 				// does the same); any refusal is acceptable, success is not.
 			}
 		}
+	}
+}
+
+// TestBuildTableRefusesATableTooSmallForItsSubtables: a complete code with
+// codewords longer than the table's index width needs subtables; a table that
+// cannot hold them is refused rather than overrun, and the right size builds.
+func TestBuildTableRefusesATableTooSmallForItsSubtables(t *testing.T) {
+	// Lengths 1..14 once, 15 twice: a complete code of 16 symbols.
+	lens := make([]uint8, 16)
+	for i := range 14 {
+		lens[i] = uint8(i + 1)
+	}
+	lens[14], lens[15] = 15, 15
+	results := make([]uint32, 16)
+	sorted := make([]uint16, 16)
+	small := make([]uint32, 1<<litTableBits+1)
+	if err := buildTable(small, lens, results, litTableBits, maxCodeLen, sorted, false); !errors.Is(err, ErrHuffman) {
+		t.Errorf("undersized table: err = %v, want ErrHuffman", err)
+	}
+	if err := buildTable(make([]uint32, litEnough), lens, results, litTableBits, maxCodeLen, sorted, false); err != nil {
+		t.Errorf("table of litEnough entries: %v", err)
 	}
 }

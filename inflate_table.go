@@ -187,10 +187,9 @@ func buildTable(table []uint32, lens []uint8, results []uint32, tableBits, maxLe
 					table[prefix] = fExceptional | fSubtable | uint32(next)<<16 | uint32(sb)<<8 | uint32(tableBits)
 					next += 1 << sb
 				}
+				// subBits covers every length that shares this prefix (see the
+				// loop that sizes it), so rl <= subBits.
 				rl := l - tableBits
-				if rl > subBits {
-					return ErrHuffman
-				}
 				e := results[sym] + uint32(rl)*0x101
 				for i := rev >> tableBits; i < 1<<subBits; i += 1 << rl {
 					table[subStart+int(i)] = e

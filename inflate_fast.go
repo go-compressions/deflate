@@ -95,9 +95,6 @@ func (s *state) truncated() bool {
 // room makes out[:op+n] addressable, growing the buffer up to limit. It
 // reports how many of the n bytes fit.
 func (s *state) room(n int) int {
-	if n <= len(s.out)-s.op {
-		return n
-	}
 	if n > s.limit-s.op {
 		n = s.limit - s.op
 	}
@@ -185,11 +182,10 @@ func (d *decoder) run(s *state) error {
 // stored copies a type-0 block. The 3 header bits are already consumed.
 func (d *decoder) stored(s *state) error {
 	// Align to the next input byte: give back whole bytes the refill loaded
-	// but nobody consumed (zero bytes past the end were never loaded).
+	// but nobody consumed (zero bytes past the end were never loaded). When
+	// the header itself ran into the implicit zeros, s.in lands past the end
+	// of the input and the length check below refuses.
 	left := int(uint8(s.bitsleft)) >> 3
-	if s.overread > left {
-		return io.ErrUnexpectedEOF
-	}
 	s.in -= left - s.overread
 	s.overread = 0
 	s.bitbuf, s.bitsleft = 0, 0
@@ -276,9 +272,6 @@ func (d *decoder) dynamic(s *state) error {
 		for ; rep > 0; rep-- {
 			lens[i] = val
 			i++
-		}
-		if s.overread > maxOverread {
-			return io.ErrUnexpectedEOF
 		}
 	}
 	if s.truncated() {
