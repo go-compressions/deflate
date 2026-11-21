@@ -2,7 +2,6 @@ package deflate
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"io"
 )
@@ -414,23 +413,5 @@ var ErrTooLarge = errors.New("deflate: decompressed size past the ceiling")
 // returned with the error. Decoding is incremental, so nothing past the ceiling
 // is decoded, let alone allocated.
 func InflateLimit(dst, src []byte, maxOut int) ([]byte, error) {
-	r := NewReader(bytes.NewReader(src))
-	buf := dst
-	tmp := make([]byte, 4096)
-	room := max(0, maxOut)
-	for {
-		n, err := r.Read(tmp)
-		if n > room {
-			buf = append(buf, tmp[:room]...)
-			return buf, ErrTooLarge
-		}
-		room -= n
-		buf = append(buf, tmp[:n]...)
-		if err == io.EOF {
-			return buf, nil
-		}
-		if err != nil {
-			return buf, err
-		}
-	}
+	return inflateBuf(dst, src, maxOut)
 }
