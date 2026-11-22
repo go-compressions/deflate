@@ -61,9 +61,11 @@ orig, n, err := deflate.InflatePrefix(nil, zlibBody, 64<<20)
 
 **Whole-buffer decoder (v0.2.0).** `Inflate`, `InflateLimit` and `InflatePrefix`
 decode through `inflateBuf`, which follows libdeflate's design with a fully
-bounds-checked loop near the ends of the buffers. **Streaming decoder.** `NewReader`
-uses the simpler one below. A bit reader feeds a compact count/symbol canonical-Huffman decoder
-(the zlib *puff* method). It handles all three block types — stored, fixed
+bounds-checked loop near the ends of the buffers. **Streaming decoder (v0.3.0).**
+`NewReader` runs the same table decoder over a 64 KiB input window and a 32 KiB
+history plus 256 KiB of output, resuming a block whenever it needs more input or the
+output is full (a bare `io.ByteReader` source keeps the bit-serial count/symbol
+decoder, the zlib *puff* method, because it cannot be read ahead). It handles all three block types — stored, fixed
 Huffman and dynamic Huffman (including the code-length run-length alphabet) —
 plus LZ77 back-reference copies over a 32 KiB sliding window, with every
 malformed-input path (reserved block type, bad stored length, over-subscribed or
@@ -148,9 +150,14 @@ that compressed them):
 | binary-l9 | 654  | 244 | 679  | 663  |
 
 That is about 2.5 to 3 times klauspost/compress on every corpus, and within about
-17 % of libdeflate and zlib (ahead of libdeflate on `synth-l9`). **The streaming
-`NewReader` is not accelerated**: it keeps the bit-serial decoder and runs at about
-195 MB/s, below `compress/flate`; use `Inflate` when the whole stream is in memory.
+17 % of libdeflate and zlib (ahead of libdeflate on `synth-l9`). **Streaming
+`NewReader` (v0.3.0)** now runs the same table decoder. Its throughput has not been
+re-measured: the benchmark host stayed above the load limit, so no timing is
+published. What was measured exactly is allocation per full read of a 512 KiB stream
+(4 MiB for `gosrc`), v0.2.0 against v0.3.0: `text` 390 KB / 39 allocs against
+138 KB / 3, `json` 384 KB / 31 against 12 KB / 3, `binary` 373 KB / 19 against
+12 KB / 3, `repetitive` 373 KB / 19 against 138 KB / 3, `gosrc` 569 KB / 251 against
+138 KB / 3.
 
 **Honest verdict.**
 
@@ -164,19 +171,19 @@ That is about 2.5 to 3 times klauspost/compress on every corpus, and within abou
   a little larger. We also **allocate far more per operation (~390–400 vs ~27)**
   — a per-block allocation cost (frequency tables, code tables, token buffers)
   that is the clearest thing left to optimize.
-- **Whole-buffer decode is fast; streaming decode is not.** `Inflate` is a
+- **Whole-buffer decode is fast.** `Inflate` is a
   libdeflate-style decoder (11-bit literal/length and 8-bit offset tables with
   subtables, a branchless 64-bit refill, word-copy matches) that runs at 2.5 to 3
   times klauspost/compress and close to libdeflate and zlib (table above). The
-  streaming `NewReader` is still the small bit-serial count/symbol decoder
-  (about 195 MB/s) and is slower than `compress/flate`, which is table-driven.
+  streaming `NewReader` runs the same decoder since v0.3.0; its speed is not yet
+  measured (see above).
 - **The SIMD `matchlen` kernel is in the encoder's hot path**, but — as with the
   sibling `lz4` — end-to-end gains are bounded because encode time is dominated
   by match-*finding* (hash chains), not match-*extension*.
 
 In short: **correctness-first and wire-compatible; competitive encode on text,
-libdeflate-class whole-buffer decode.** The streaming reader and the encoder on
-`binary` and `json` at the default level are still slower than `compress/flate`;
+libdeflate-class whole-buffer decode.** The encoder on
+`binary` and `json` at the default level is still slower than `compress/flate`;
 the value here is a clean, fully-tested, SIMD-`matchlen` DEFLATE that
 interoperates with it exactly.
 
