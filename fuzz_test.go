@@ -45,8 +45,8 @@ func FuzzReader(f *testing.F) {
 		for total := 0; total < 1<<22; {
 			k, err := r.Read(buf)
 			total += k
-			if l := len(r.(*reader).buf); l > 1<<19 {
-				t.Fatalf("decoder holds %d bytes", l)
+			if rd, ok := r.(*streamReader); ok && rd.bufs != nil && rd.s.op > streamOutSize {
+				t.Fatalf("decoder holds %d bytes", rd.s.op)
 			}
 			if err != nil {
 				return

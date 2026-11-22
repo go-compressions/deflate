@@ -1,7 +1,6 @@
 package deflate
 
 import (
-	"bufio"
 	"errors"
 	"io"
 )
@@ -48,14 +47,28 @@ const pendingLimit = 1 << 16
 // NewReader returns an io.ReadCloser that decompresses the raw DEFLATE (RFC
 // 1951) stream read from r. It is the inverse of NewWriter and also reads
 // streams produced by compress/flate. Close never returns an error; it exists
-// so a *reader satisfies io.ReadCloser.
+// so the reader satisfies io.ReadCloser.
+//
+// The decoder reads r in chunks, so it may read past the end of the stream, as
+// compress/flate does when r is not an io.ByteReader. It reads exactly the
+// bytes of the stream, leaving the rest for the caller (a gzip or zlib trailer,
+// a following stream), when r is a *bufio.Reader, a *bytes.Reader or a
+// *strings.Reader; any other io.ByteReader is read a byte at a time, slowly,
+// for the same reason.
 func NewReader(r io.Reader) io.ReadCloser {
-	var br io.ByteReader
-	if b, ok := r.(io.ByteReader); ok {
-		br = b
-	} else {
-		br = bufio.NewReader(r)
+	if _, ok := r.(io.ByteReader); ok {
+		_, peek := r.(peeker)
+		_, seek := r.(io.Seeker)
+		if !peek && !seek {
+			return newByteReader(r.(io.ByteReader))
+		}
 	}
+	return newStreamReader(r)
+}
+
+// newByteReader is the bit-at-a-time decoder, the only one that reads a bare
+// io.ByteReader byte by byte and so never past the end of the stream.
+func newByteReader(br io.ByteReader) *reader {
 	return &reader{src: br, buf: make([]byte, 0, windowSize)}
 }
 
