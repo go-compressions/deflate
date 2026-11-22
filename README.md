@@ -48,6 +48,10 @@ orig, _ := deflate.Inflate(nil, comp)      // DEFLATE -> src, at most 1 GiB
 
 // Untrusted input: choose the ceiling.
 orig, err := deflate.InflateLimit(nil, comp, 64<<20) // deflate.ErrTooLarge past 64 MiB
+
+// A DEFLATE stream followed by more bytes (zlib's Adler-32, a gzip trailer):
+// n is how many input bytes the stream occupied.
+orig, n, err := deflate.InflatePrefix(nil, zlibBody, 64<<20)
 ```
 
 `NewWriter` accepts `DefaultCompression`, `NoCompression` and the range
@@ -55,7 +59,10 @@ orig, err := deflate.InflateLimit(nil, comp, 64<<20) // deflate.ErrTooLarge past
 
 ## How it works
 
-**Decoder.** A bit reader feeds a compact count/symbol canonical-Huffman decoder
+**Whole-buffer decoder (v0.2.0).** `Inflate`, `InflateLimit` and `InflatePrefix`
+decode through `inflateBuf`, which follows libdeflate's design with a fully
+bounds-checked loop near the ends of the buffers. **Streaming decoder.** `NewReader`
+uses the simpler one below. A bit reader feeds a compact count/symbol canonical-Huffman decoder
 (the zlib *puff* method). It handles all three block types — stored, fixed
 Huffman and dynamic Huffman (including the code-length run-length alphabet) —
 plus LZ77 back-reference copies over a 32 KiB sliding window, with every
@@ -87,7 +94,10 @@ no size limit in the format.
 - Header sizes are all bounded by the format (at most 288 + 32 code lengths, stored
   blocks at most 64 KiB), so no allocation follows a declared size.
 - Fuzzed: `FuzzInflate` (differential against `compress/flate`), `FuzzReader`,
-  `FuzzRoundTrip`.
+  `FuzzRoundTrip` and `FuzzInflateAgrees` (the whole-buffer decoder against the
+  streaming one). A nightly workflow fuzzes every `FuzzXxx` it finds. The
+  whole-buffer decoder is also checked against libdeflate v1.23 by a build-tagged
+  differential test (139253 inputs, 0 divergences).
 - The encoder buffers its whole input until `Close`, plus a 4-byte-per-input-byte
   match table and its whole output: it is not a streaming encoder, and its memory
   follows what the caller wrote, not any field of a stream.
@@ -101,7 +111,7 @@ generated deterministically in-process:
 go test -run=^$ -bench=. -benchmem
 ```
 
-Numbers below are from an **Apple M4 Max** (`darwin/arm64`), Go 1.26.4, on four
+The encode numbers below are from an **Apple M4 Max** (`darwin/arm64`), Go 1.26.4, on four
 512 KiB corpora, **as of 2026-07-03**. Throughput is MB/s (higher is better);
 *ratio* is compressed ÷ original (lower is better); *allocs* is allocations per
 operation. **These are the exact values `go test -bench` prints on this host;
@@ -120,18 +130,27 @@ they are what the claims below are based on — nothing is cherry-picked.**
 | repetitive | default | 690  | 790  | 0.87×     | 0.0034 | 0.0030 | 287 | 21 |
 | repetitive | best    | 686  | 790  | 0.87×     | 0.0034 | 0.0030 | 287 | 21 |
 
-### Decode (both decoders reading the *same* `flate`-produced stream)
+### Decode (whole-buffer `Inflate`, v0.2.0, as of 2026-11-22)
 
-| corpus | level | ours MB/s | `flate` MB/s | ours vs `flate` |
-|---|---|--:|--:|--:|
-| text       | default | 253 | 460   | 0.55× |
-| text       | best    | 266 | 472   | 0.56× |
-| json       | default | 343 | 973   | 0.35× |
-| json       | best    | 342 | 1067  | 0.32× |
-| binary     | default | 68.7 | 216  | 0.32× |
-| binary     | best    | 68.8 | 216  | 0.32× |
-| repetitive | default | 464 | 10971 | 0.04× |
-| repetitive | best    | 465 | 10961 | 0.04× |
+`Inflate`, `InflateLimit` and `InflatePrefix` use a libdeflate-style whole-buffer
+decoder. Apple M4 Max, single core, 128 KiB blocks, MB/s of output (higher is
+better), ours against klauspost/compress, libdeflate and zlib decoding the same
+streams (`synth`, `gosrc` and `binary` are the corpora, `l3` and `l9` the level
+that compressed them):
+
+| corpus | ours | klauspost | libdeflate | zlib |
+|---|--:|--:|--:|--:|
+| synth-l3  | 1435 | 522 | 1714 | 1604 |
+| synth-l9  | 1596 | 543 | 1414 | 1735 |
+| gosrc-l3  | 1579 | 629 | 1692 | 1798 |
+| gosrc-l9  | 2076 | 737 | 2120 | 2135 |
+| binary-l3 | 665  | 251 | 704  | 700  |
+| binary-l9 | 654  | 244 | 679  | 663  |
+
+That is about 2.5 to 3 times klauspost/compress on every corpus, and within about
+17 % of libdeflate and zlib (ahead of libdeflate on `synth-l9`). **The streaming
+`NewReader` is not accelerated**: it keeps the bit-serial decoder and runs at about
+195 MB/s, below `compress/flate`; use `Inflate` when the whole stream is in memory.
 
 **Honest verdict.**
 
@@ -145,21 +164,21 @@ they are what the claims below are based on — nothing is cherry-picked.**
   a little larger. We also **allocate far more per operation (~390–400 vs ~27)**
   — a per-block allocation cost (frequency tables, code tables, token buffers)
   that is the clearest thing left to optimize.
-- **`flate` wins decode across the board (≈1.8–3×, and ~25× on the highly
-  repetitive input).** Our decoder is a small, correct, bit-serial count/symbol
-  Huffman design that copies back-references byte-by-byte; `flate`'s is a mature
-  table-driven decoder with fast bulk copies. Decode is inherently bit-serial and
-  not SIMD-amenable, so this package targets correctness and wire-compatibility
-  here rather than raw speed.
+- **Whole-buffer decode is fast; streaming decode is not.** `Inflate` is a
+  libdeflate-style decoder (11-bit literal/length and 8-bit offset tables with
+  subtables, a branchless 64-bit refill, word-copy matches) that runs at 2.5 to 3
+  times klauspost/compress and close to libdeflate and zlib (table above). The
+  streaming `NewReader` is still the small bit-serial count/symbol decoder
+  (about 195 MB/s) and is slower than `compress/flate`, which is table-driven.
 - **The SIMD `matchlen` kernel is in the encoder's hot path**, but — as with the
   sibling `lz4` — end-to-end gains are bounded because encode time is dominated
   by match-*finding* (hash chains), not match-*extension*.
 
 In short: **correctness-first and wire-compatible; competitive encode on text,
-slower decode than the standard library.** If raw throughput on arbitrary data
-is the priority, `compress/flate` is still the better choice; the value here is
-a clean, fully-tested, SIMD-`matchlen` DEFLATE that interoperates with it
-exactly.
+libdeflate-class whole-buffer decode.** The streaming reader and the encoder on
+`binary` and `json` at the default level are still slower than `compress/flate`;
+the value here is a clean, fully-tested, SIMD-`matchlen` DEFLATE that
+interoperates with it exactly.
 
 ## License
 
