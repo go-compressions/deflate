@@ -165,7 +165,14 @@ func TestTruncationSweep(t *testing.T) {
 	for _, in := range inputs {
 		for _, lvl := range []int{0, 6, 9} {
 			full := compress(t, in, lvl)
+			// Every cut within 64 bytes of either end (headers, final
+			// block, trailer), and a stride in between: the full sweep is
+			// quadratic and ran past the CI timeout under -race.
+			stride := len(full)/256 + 1
 			for cut := 0; cut < len(full); cut++ {
+				if cut >= 64 && cut < len(full)-64 && cut%stride != 0 {
+					continue
+				}
 				func() {
 					defer func() {
 						if r := recover(); r != nil {
