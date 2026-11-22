@@ -114,7 +114,7 @@ func (s *state) room(n int) int {
 // inflateBuf decodes the raw DEFLATE stream src, appending to dst and never
 // growing the result past maxOut bytes. On error the bytes decoded so far are
 // returned with it.
-func inflateBuf(dst, src []byte, maxOut int) ([]byte, error) {
+func inflateBuf(dst, src []byte, maxOut int) ([]byte, int, error) {
 	base := len(dst)
 	room := max(0, maxOut)
 	const maxInt = int(^uint(0) >> 1)
@@ -135,7 +135,10 @@ func inflateBuf(dst, src []byte, maxOut int) ([]byte, error) {
 	d := decoderPool.Get().(*decoder)
 	err := d.run(&s)
 	decoderPool.Put(d)
-	return s.out[:s.op], err
+	// The final block ends mid-byte: the bytes the bit buffer holds whole were
+	// loaded but not used, and those past the end of src were never loaded.
+	consumed := s.in - (int(uint8(s.bitsleft))>>3 - s.overread)
+	return s.out[:s.op], consumed, err
 }
 
 func (d *decoder) run(s *state) error {

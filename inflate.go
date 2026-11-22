@@ -413,5 +413,15 @@ var ErrTooLarge = errors.New("deflate: decompressed size past the ceiling")
 // returned with the error. Decoding is incremental, so nothing past the ceiling
 // is decoded, let alone allocated.
 func InflateLimit(dst, src []byte, maxOut int) ([]byte, error) {
+	out, _, err := inflateBuf(dst, src, maxOut)
+	return out, err
+}
+
+// InflatePrefix is [InflateLimit] for a DEFLATE stream that is followed by
+// something else, such as the Adler-32 of a zlib stream or the CRC-32 and size
+// of a gzip member. It also returns n, the number of bytes of src the stream
+// occupies (its last byte is partly used when the final block ends mid-byte);
+// src[n:] is the trailer. n is meaningful only when err is nil.
+func InflatePrefix(dst, src []byte, maxOut int) (out []byte, n int, err error) {
 	return inflateBuf(dst, src, maxOut)
 }
