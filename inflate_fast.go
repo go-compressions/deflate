@@ -2,6 +2,7 @@ package deflate
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"sync"
 )
@@ -60,7 +61,21 @@ type state struct {
 	op    int
 	base  int // out[:base] precedes the stream and is not a match source
 	limit int
+
+	// Streaming mode (the reader behind NewReader): src is a window onto a longer
+	// input and out is a fixed buffer. The block decoder then stops, with the
+	// bit buffer at a symbol boundary, when it needs input it does not have
+	// (errNeedInput) or space for a whole match (errOutFull), and resumes from
+	// there. eof says that no input follows src, so zeros may be fed.
+	stream bool
+	eof    bool
 }
+
+// Resumption requests of the streaming mode; never returned to a caller.
+var (
+	errNeedInput = errors.New("deflate: need more input")
+	errOutFull   = errors.New("deflate: output buffer full")
+)
 
 // fill tops the bit buffer up to at least 56 bits, a byte at a time, feeding
 // zero bytes past the end of the input.
@@ -299,6 +314,13 @@ func (d *decoder) huffman(s *state, lit *[litEnough]uint32, off *[offEnough]uint
 	inFast := len(src) - min(len(src), fastReadMargin)
 	var err error
 
+	// Streaming mode only: the bit buffer as it was before a generic step that
+	// had to feed zeros, so the step can be undone if it consumed any of them.
+	var snap bool
+	var sbit uint64
+	var sleft uint32
+	var sin, sover int
+
 loop:
 	for {
 		outFast := len(out) - min(len(out), fastWriteMargin)
@@ -452,6 +474,16 @@ loop:
 		}
 
 		// Generic step: one symbol, every bound checked, output grown on demand.
+		snap = false
+		if s.stream && op+maxMatch > len(out) {
+			err = errOutFull
+			break loop
+		}
+		if s.stream && !s.eof {
+			// Zeros fed to an earlier step may still be in the bit buffer, so
+			// every step is checked, not only those that feed them.
+			snap, sbit, sleft, sin, sover = true, bitbuf, bitsleft, in, overread
+		}
 		if uint8(bitsleft) < 48 {
 			if in+8 <= len(src) {
 				bitbuf |= binary.LittleEndian.Uint64(src[in:]) << (bitsleft & 63)
@@ -467,7 +499,7 @@ loop:
 					}
 					bitsleft += 8
 				}
-				if overread > maxOverread {
+				if overread > maxOverread && !snap {
 					err = io.ErrUnexpectedEOF
 					break loop
 				}
@@ -482,6 +514,9 @@ loop:
 			saved = bitbuf
 			bitbuf >>= entry & 63
 			bitsleft -= entry
+		}
+		if snap && overread > int(uint8(bitsleft))>>3 {
+			break loop // undone after the loop
 		}
 		if entry&fLiteral != 0 {
 			if op >= len(out) {
@@ -523,6 +558,9 @@ loop:
 		bitbuf >>= oe & 63
 		bitsleft -= oe
 		offset := int(oe>>16) + int((saved&(1<<(oe&63)-1))>>((oe>>8)&63))
+		if snap && overread > int(uint8(bitsleft))>>3 {
+			break loop // undone after the loop
+		}
 		if offset > op-base {
 			err = ErrDistance
 			break loop
@@ -541,6 +579,12 @@ loop:
 		}
 	}
 
+	if snap && overread > int(uint8(bitsleft))>>3 {
+		// The last symbol ran into the zeros fed past the end of the input
+		// window: undo it, so it is decoded again once more input is there.
+		bitbuf, bitsleft, in, overread = sbit, sleft, sin, sover
+		err = errNeedInput
+	}
 	s.out, s.op, s.in = out, op, in
 	s.bitbuf, s.bitsleft, s.overread = bitbuf, uint32(uint8(bitsleft)), overread
 	return err

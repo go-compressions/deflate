@@ -39,11 +39,11 @@ func TestBomb_OneBlockDoesNotPileUpItsOutput(t *testing.T) {
 			t.Fatal(err)
 		}
 		got = 1
-		rd := r.(*reader)
-		if len(rd.buf) > windowSize+pendingLimit+258 {
-			t.Errorf("after one byte the decoder holds %d bytes", len(rd.buf))
+		rd := r.(*streamReader)
+		if len(rd.s.out) > streamOutSize || rd.s.op > streamOutSize {
+			t.Errorf("after one byte the decoder holds %d bytes", rd.s.op)
 		}
-		if !rd.inBlock {
+		if rd.phase != phHuffman {
 			t.Error("the block was not interrupted")
 		}
 	})
@@ -65,8 +65,8 @@ func TestBomb_OneBlockDoesNotPileUpItsOutput(t *testing.T) {
 				}
 			}
 			total += k
-			if l := len(r.(*reader).buf); l > 1<<18 {
-				t.Fatalf("decoder holds %d bytes", l)
+			if rd, ok := r.(*streamReader); ok && rd.bufs != nil && rd.s.op > streamOutSize {
+				t.Fatalf("decoder holds %d bytes", rd.s.op)
 			}
 			if err == io.EOF {
 				break
@@ -106,7 +106,7 @@ func TestReader_ResumesBlocksWithHistory(t *testing.T) {
 		for {
 			k, err := rd.Read(buf)
 			out.Write(buf[:k])
-			interrupted = interrupted || rd.(*reader).inBlock
+			interrupted = interrupted || rd.(*streamReader).phase == phHuffman
 			if err == io.EOF {
 				break
 			}
