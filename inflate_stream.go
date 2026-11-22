@@ -242,10 +242,9 @@ func (z *streamReader) stored() error {
 	if z.storedLeft > 0 {
 		k := min(z.storedLeft, len(s.src)-s.in, len(s.out)-s.op)
 		if k == 0 {
-			switch {
-			case len(s.out)-s.op == 0:
-				return errOutFull
-			case s.eof:
+			// The output has room: advance slides first, and slide opens
+			// room whenever less than a fast-loop margin is left.
+			if s.eof {
 				return io.ErrUnexpectedEOF
 			}
 			return errNeedInput

@@ -55,9 +55,11 @@ func compress(t *testing.T, data []byte, level int) []byte {
 }
 
 func TestReaderClose(t *testing.T) {
-	r := NewReader(bytes.NewReader(compress(t, []byte("hi"), 6)))
-	if err := r.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	for _, src := range bothReaders(compress(t, []byte("hi"), 6)) {
+		r := NewReader(src)
+		if err := r.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
 	}
 }
 
@@ -87,25 +89,28 @@ func TestInflateError(t *testing.T) {
 }
 
 func TestReservedBlockType(t *testing.T) {
-	_, err := io.ReadAll(NewReader(bytes.NewReader([]byte{0x07})))
-	if err != ErrHeader {
-		t.Fatalf("got %v want ErrHeader", err)
+	for _, src := range bothReaders([]byte{0x07}) {
+		if _, err := io.ReadAll(NewReader(src)); err != ErrHeader {
+			t.Fatalf("got %v want ErrHeader", err)
+		}
 	}
 }
 
 func TestTruncatedStreamEmpty(t *testing.T) {
-	_, err := io.ReadAll(NewReader(bytes.NewReader(nil)))
-	if err != io.ErrUnexpectedEOF {
-		t.Fatalf("got %v want ErrUnexpectedEOF", err)
+	for _, src := range bothReaders(nil) {
+		if _, err := io.ReadAll(NewReader(src)); err != io.ErrUnexpectedEOF {
+			t.Fatalf("got %v want ErrUnexpectedEOF", err)
+		}
 	}
 }
 
 func TestStoredCorruptLength(t *testing.T) {
 	// BFINAL=1 BTYPE=00 -> 0x01, then LEN=0x0001, NLEN=0x0000 (should be 0xFFFE).
 	stream := []byte{0x01, 0x01, 0x00, 0x00, 0x00, 0x41}
-	_, err := io.ReadAll(NewReader(bytes.NewReader(stream)))
-	if err != ErrStored {
-		t.Fatalf("got %v want ErrStored", err)
+	for _, src := range bothReaders(stream) {
+		if _, err := io.ReadAll(NewReader(src)); err != ErrStored {
+			t.Fatalf("got %v want ErrStored", err)
+		}
 	}
 }
 
@@ -116,8 +121,10 @@ func TestStoredTruncated(t *testing.T) {
 		{0x01, 0x05, 0x00, 0xFA, 0xFF},       // EOF reading data
 		{0x01, 0x05, 0x00, 0xFA, 0xFF, 0x41}, // partial data
 	} {
-		if _, err := io.ReadAll(NewReader(bytes.NewReader(s))); err != io.ErrUnexpectedEOF {
-			t.Fatalf("stream %v: got %v want ErrUnexpectedEOF", s, err)
+		for _, src := range bothReaders(s) {
+			if _, err := io.ReadAll(NewReader(src)); err != io.ErrUnexpectedEOF {
+				t.Fatalf("stream %v: got %v want ErrUnexpectedEOF", s, err)
+			}
 		}
 	}
 }
@@ -165,9 +172,11 @@ func TestTruncationSweep(t *testing.T) {
 							t.Fatalf("panic on truncation cut=%d: %v", cut, r)
 						}
 					}()
-					got, err := io.ReadAll(NewReader(bytes.NewReader(full[:cut])))
-					if err == nil && bytes.Equal(got, in) {
-						t.Fatalf("truncation cut=%d decoded full input", cut)
+					for _, src := range bothReaders(full[:cut]) {
+						got, err := io.ReadAll(NewReader(src))
+						if err == nil && bytes.Equal(got, in) {
+							t.Fatalf("truncation cut=%d decoded full input", cut)
+						}
 					}
 				}()
 			}
@@ -201,7 +210,9 @@ func TestCorruptionFuzz(t *testing.T) {
 							t.Fatalf("panic on corruption: %v", r)
 						}
 					}()
-					_, _ = io.ReadAll(NewReader(bytes.NewReader(b)))
+					for _, src := range bothReaders(b) {
+						_, _ = io.ReadAll(NewReader(src))
+					}
 				}()
 			}
 		}

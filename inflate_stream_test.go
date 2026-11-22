@@ -551,3 +551,187 @@ func TestStreamDeliversBeforeWaiting(t *testing.T) {
 		t.Fatalf("decode: err=%v", err)
 	}
 }
+
+// bare is an io.ByteReader and nothing else that NewReader recognises, so it
+// gets the bit-by-bit reader.
+type bare struct {
+	data []byte
+	pos  int
+}
+
+func (b *bare) ReadByte() (byte, error) {
+	if b.pos >= len(b.data) {
+		return 0, io.EOF
+	}
+	c := b.data[b.pos]
+	b.pos++
+	return c, nil
+}
+
+func (b *bare) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	c, err := b.ReadByte()
+	if err != nil {
+		return 0, err
+	}
+	p[0] = c
+	return 1, nil
+}
+
+// bothReaders is b behind each of the two decoders NewReader chooses between.
+func bothReaders(b []byte) []io.Reader {
+	return []io.Reader{bytes.NewReader(b), &bare{data: b}}
+}
+
+// bitStream builds a DEFLATE stream bit by bit: put is LSB-first as header
+// fields and extra bits are, code is MSB-first as Huffman codes are.
+type bitStream struct {
+	out []byte
+	n   uint
+}
+
+func (b *bitStream) bit(v uint) {
+	if b.n%8 == 0 {
+		b.out = append(b.out, 0)
+	}
+	b.out[len(b.out)-1] |= byte(v&1) << (b.n % 8)
+	b.n++
+}
+
+func (b *bitStream) put(v uint, width int) {
+	for i := 0; i < width; i++ {
+		b.bit(v >> i)
+	}
+}
+
+func (b *bitStream) code(v uint, width int) {
+	for i := width - 1; i >= 0; i-- {
+		b.bit(v >> i)
+	}
+}
+
+// TestReservedDistanceSymbol: the fixed code has distance symbols 30 and 31,
+// which no distance uses; every decoder refuses a match that names one.
+func TestReservedDistanceSymbol(t *testing.T) {
+	var b bitStream
+	b.put(1, 1)         // BFINAL
+	b.put(1, 2)         // BTYPE fixed
+	b.code(0x30+'a', 8) // literal a
+	b.code(1, 7)        // length symbol 257
+	b.code(30, 5)       // distance symbol 30
+	b.put(0, 24)        // the bit-by-bit reader looks this far for a code's end
+	if _, err := Inflate(nil, b.out); err != ErrHuffman {
+		t.Fatalf("Inflate: got %v want ErrHuffman", err)
+	}
+	for _, src := range bothReaders(b.out) {
+		if _, err := io.ReadAll(NewReader(src)); err != ErrHuffman {
+			t.Fatalf("%T: got %v want ErrHuffman", src, err)
+		}
+	}
+}
+
+// TestBareReaderReadNil: a zero-length Read on the bit-by-bit reader reports its
+// error and nothing else.
+func TestBareReaderReadNil(t *testing.T) {
+	r := NewReader(&bare{data: compressStd(t, []byte("abc"), 6, 0)})
+	if n, err := r.Read(nil); n != 0 || err != nil {
+		t.Fatalf("Read(nil) = %d, %v", n, err)
+	}
+}
+
+// TestHeaderTruncations cuts every stream at every byte of its first 300, which
+// is where the dynamic tables are, so that each field of a header is the one the
+// input ends in. All decoders must refuse, none panic.
+func TestHeaderTruncations(t *testing.T) {
+	for name, d := range corpus() {
+		if len(d) > 40000 {
+			d = d[:40000]
+		}
+		for _, lvl := range []int{6, 9} {
+			full := compressStd(t, d, lvl, 0)
+			for cut := 0; cut < len(full) && cut < 300; cut++ {
+				for _, src := range bothReaders(full[:cut]) {
+					got, err := io.ReadAll(NewReader(src))
+					if err == nil && len(d) > 0 && bytes.Equal(got, d) {
+						t.Fatalf("%s level %d cut %d decoded everything", name, lvl, cut)
+					}
+				}
+			}
+		}
+	}
+}
+
+// reservedDistanceDynamic is a dynamic block whose distance code has a symbol
+// 30, which a dynamic header may declare (up to 32 distance codes) although no
+// distance uses it, followed by a match that names it.
+func reservedDistanceDynamic() []byte {
+	var b bitStream
+	b.put(1, 1)  // BFINAL
+	b.put(2, 2)  // BTYPE dynamic
+	b.put(2, 5)  // HLIT: 259 literal/length codes
+	b.put(30, 5) // HDIST: 31 distance codes
+	b.put(14, 4) // HCLEN: 18 code-length code lengths
+	for _, l := range []uint{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2} {
+		b.put(l, 3)
+	}
+	// Code-length code: symbol 0 is "0", symbol 1 is "10", symbol 2 is "11".
+	emit := func(l int) {
+		switch l {
+		case 0:
+			b.code(0, 1)
+		case 1:
+			b.code(2, 2)
+		default:
+			b.code(3, 2)
+		}
+	}
+	for i := 0; i < 259; i++ {
+		if i == 97 || i >= 256 {
+			emit(2)
+		} else {
+			emit(0)
+		}
+	}
+	for i := 0; i < 31; i++ {
+		if i == 0 || i == 30 {
+			emit(1)
+		} else {
+			emit(0)
+		}
+	}
+	b.code(0, 2) // literal a
+	b.code(2, 2) // length symbol 257
+	b.code(1, 1) // distance symbol 30
+	b.put(0, 24) // room for whatever follows
+	return b.out
+}
+
+// TestReservedDistanceDynamic: no decoder accepts a match whose distance symbol
+// is 30 or 31, however the code declares it.
+func TestReservedDistanceDynamic(t *testing.T) {
+	s := reservedDistanceDynamic()
+	if _, err := Inflate(nil, s); err == nil {
+		t.Fatal("Inflate accepted distance symbol 30")
+	}
+	for _, src := range bothReaders(s) {
+		if _, err := io.ReadAll(NewReader(src)); err == nil {
+			t.Fatalf("%T accepted distance symbol 30", src)
+		}
+	}
+	if _, err := io.ReadAll(NewReader(&bare{data: s})); err != ErrHuffman {
+		t.Fatalf("bit-by-bit reader: got %v want ErrHuffman", err)
+	}
+}
+
+// TestBareReaderCompactsWithPendingOutput: the bit-by-bit reader trims its
+// buffer to the window even when more than a window of output is undelivered.
+func TestBareReaderCompactsWithPendingOutput(t *testing.T) {
+	data := make([]byte, 1<<20)
+	z := compressStd(t, data, 6, 0)
+	got, err := readAllSizes(NewReader(&bare{data: z}), fixedSize(33000))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("err=%v, %d bytes", err, len(got))
+	}
+}
